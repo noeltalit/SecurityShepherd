@@ -3,16 +3,21 @@ package servlets.module.challenge;
 import dbProcs.Database;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Locale;
 import java.util.ResourceBundle;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.owasp.encoder.Encode;
@@ -50,6 +55,66 @@ public class SessionManagement5SetToken extends HttpServlet {
   private static final Logger log = LogManager.getLogger(SessionManagement5SetToken.class);
   private static String levelName = "SessionManagement5SetToken";
   public static String levelHash = SessionManagement5.levelHash;
+
+  /** How long a reset token stays valid for, in milliseconds */
+  private static final long TOKEN_LIFE_MS = 10 * 60 * 1000;
+
+  private static final SecureRandom random = new SecureRandom();
+
+  /**
+   * Outstanding reset tokens by user name, kept on the server. A token would only ever be delivered
+   * to the account owner by email; it is never returned in an HTTP response.
+   */
+  private static final ConcurrentHashMap<String, ResetToken> resetTokens =
+      new ConcurrentHashMap<String, ResetToken>();
+
+  private static final class ResetToken {
+    private final String token;
+    private final long expires;
+
+    private ResetToken(String token, long expires) {
+      this.token = token;
+      this.expires = expires;
+    }
+  }
+
+  /**
+   * Issues a new random reset token for a user, replacing any earlier one
+   *
+   * @param userName Sub schema user name
+   */
+  static void issueToken(String userName) {
+    byte[] bytes = new byte[32];
+    random.nextBytes(bytes);
+    resetTokens.put(
+        userName,
+        new ResetToken(Hex.encodeHexString(bytes), System.currentTimeMillis() + TOKEN_LIFE_MS));
+  }
+
+  /**
+   * Checks a submitted reset token. A token can only be used once, so a matching token is removed.
+   *
+   * @param userName Sub schema user name the token was issued for
+   * @param token The submitted token
+   * @return True if the token was issued for this user, has not expired and has not been used
+   */
+  static boolean consumeToken(String userName, String token) {
+    if (userName == null || token == null || token.isEmpty()) {
+      return false;
+    }
+    ResetToken issued = resetTokens.get(userName);
+    if (issued == null) {
+      return false;
+    }
+    if (issued.expires < System.currentTimeMillis()) {
+      resetTokens.remove(userName, issued);
+      return false;
+    }
+    boolean matches =
+        MessageDigest.isEqual(
+            issued.token.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8));
+    return matches && resetTokens.remove(userName, issued);
+  }
 
   /**
    * Used to apparently send a message to a user with a token to reset their password.
@@ -110,6 +175,7 @@ public class SessionManagement5SetToken extends HttpServlet {
         // Is the username valid?
         if (resultSet.next()) {
           log.debug("User found");
+          issueToken(resultSet.getString(1));
           htmlOutput =
               bundle.getString("setToken.sentTo.1")
                   + " '"

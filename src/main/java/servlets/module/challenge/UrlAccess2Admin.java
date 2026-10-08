@@ -11,8 +11,6 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.owasp.encoder.Encode;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -43,7 +41,6 @@ public class UrlAccess2Admin extends HttpServlet {
   // Sql Challenge 4
   private static final long serialVersionUID = 1L;
   private static final Logger log = LogManager.getLogger(UrlAccess2Admin.class);
-  private static String levelResult = "40b675e3d404c52b36abe31d05842b283975ec62e8";
   private static String levelName = "URL Access 2 (Admin)";
 
   public void doPost(HttpServletRequest request, HttpServletResponse response)
@@ -54,7 +51,6 @@ public class UrlAccess2Admin extends HttpServlet {
 
     // Translation Stuff
     Locale locale = new Locale(Validate.validateLanguage(request.getSession()));
-    ResourceBundle errors = ResourceBundle.getBundle("i18n.servlets.errors", locale);
     ResourceBundle bundle =
         ResourceBundle.getBundle("i18n.servlets.challenges.urlAccess.urlAccess2", locale);
 
@@ -66,48 +62,18 @@ public class UrlAccess2Admin extends HttpServlet {
       log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
       PrintWriter out = response.getWriter();
       out.print(getServletInfo());
-      String htmlOutput = new String();
-
-      try {
-        String userData = request.getParameter("adminData");
-        boolean tamperedRequest = !userData.equalsIgnoreCase("youAreAnAdminOfAwesomenessWoopWoop");
-        if (!tamperedRequest) {
-          log.debug("No request tampering detected");
-        } else {
-          log.debug("User Submitted - " + userData);
-        }
-
-        if (!tamperedRequest) {
-          String userKey =
-              Hash.generateUserSolution(levelResult, (String) ses.getAttribute("userName"));
-          htmlOutput =
-              "<h2 class='title'>"
-                  + bundle.getString("admin.clicked")
-                  + "</h2>"
-                  + "<p>"
-                  + bundle.getString("admin.keyMessage.1")
-                  + "<br /> "
-                  + "<a>"
-                  + userKey
-                  + "</a><br />"
-                  + bundle.getString("admin.keyMessage.2")
-                  + "</p>";
-        } else {
-          htmlOutput =
-              "<h2 class='title'>"
-                  + bundle.getString("response.failue")
-                  + "</h2>"
-                  + "<p>"
-                  + bundle.getString("response.failue.message")
-                  + "</p>"
-                  + "<!-- "
-                  + Encode.forHtml(userData)
-                  + " -->";
-        }
-      } catch (Exception e) {
-        out.write(errors.getString("error.funky"));
-        log.fatal(levelName + " - " + e.toString());
-      }
+      // There is no administrator role in this sub application that a player can hold, so the
+      // admin function is closed to every user. The decision is made on the server and does not
+      // depend on anything the client submits.
+      log.warn(levelName + " admin function denied to " + ses.getAttribute("userName"));
+      response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+      String htmlOutput =
+          "<h2 class='title'>"
+              + bundle.getString("response.accessDenied")
+              + "</h2>"
+              + "<p>"
+              + bundle.getString("response.accessDenied.message")
+              + "</p>";
       log.debug("Outputting HTML");
       out.write(htmlOutput);
     } else {

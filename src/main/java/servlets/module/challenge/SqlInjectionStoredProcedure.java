@@ -3,8 +3,8 @@ package servlets.module.challenge;
 import dbProcs.Database;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.sql.CallableStatement;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Locale;
@@ -47,6 +47,8 @@ public class SqlInjectionStoredProcedure extends HttpServlet {
   public static String levelHash =
       "7edcbc1418f11347167dabb69fcb54137960405da2f7a90a0684f86c4d45a2e7";
 
+  private static final int MAX_ADDRESS_LENGTH = 128;
+
   // private static String levelResult = ""; // Stored in Vulnerable DB. Not user Specific
 
   public void doPost(HttpServletRequest request, HttpServletResponse response)
@@ -73,53 +75,59 @@ public class SqlInjectionStoredProcedure extends HttpServlet {
       try {
         String userIdentity = request.getParameter("userIdentity");
         log.debug("User Submitted - " + userIdentity);
+        if (userIdentity == null) {
+          userIdentity = "";
+        }
+        if (userIdentity.length() > MAX_ADDRESS_LENGTH) {
+          // Longer than the procedure's parameter: can never match a customer address
+          log.debug("Rejecting over-long input");
+          out.write("<p>" + bundle.getString("response.noResults") + "</p>");
+          return;
+        }
         String ApplicationRoot = getServletContext().getRealPath("");
 
         log.debug("Getting Connection to Database");
-        Connection conn =
-            Database.getChallengeConnection(ApplicationRoot, "SqlChallengeStoredProc");
-        PreparedStatement prepstmt = conn.prepareStatement("CALL findUser(?);");
-        prepstmt.setString(1, userIdentity);
-        ResultSet resultSet = prepstmt.executeQuery();
+        try (Connection conn =
+            Database.getChallengeConnection(ApplicationRoot, "SqlChallengeStoredProc")) {
+          // The user input is only ever passed to the stored procedure as a bound parameter, never
+          // concatenated into the CALL statement, so it cannot change the statement's structure.
+          CallableStatement callstmt = conn.prepareCall("CALL findUser(?)");
+          callstmt.setString(1, userIdentity);
+          ResultSet resultSet = callstmt.executeQuery();
 
-        int i = 0;
-        htmlOutput = "<h2 class='title'>" + bundle.getString("response.searchResults") + "</h2>";
-        htmlOutput +=
-            "<table><tr><th>"
-                + bundle.getString("response.table.name")
-                + "</th><th>"
-                + bundle.getString("response.table.address")
-                + "</th><th>"
-                + bundle.getString("response.table.comment")
-                + "</th></tr>";
-
-        log.debug("Opening Result Set from query");
-        while (resultSet.next()) {
-          log.debug("Adding Customer " + resultSet.getString(2));
+          int i = 0;
+          htmlOutput = "<h2 class='title'>" + bundle.getString("response.searchResults") + "</h2>";
           htmlOutput +=
-              "<tr><td>"
-                  + Encode.forHtml(resultSet.getString(2))
-                  + "</td><td>"
-                  + Encode.forHtml(resultSet.getString(3))
-                  + "</td><td>"
-                  + Encode.forHtml(resultSet.getString(4))
-                  + "</td></tr>";
-          i++;
-        }
-        conn.close();
-        htmlOutput += "</table>";
-        if (i == 0) {
-          htmlOutput = "<p>" + bundle.getString("response.noResults") + "</p>";
+              "<table><tr><th>"
+                  + bundle.getString("response.table.name")
+                  + "</th><th>"
+                  + bundle.getString("response.table.address")
+                  + "</th><th>"
+                  + bundle.getString("response.table.comment")
+                  + "</th></tr>";
+
+          log.debug("Opening Result Set from query");
+          while (resultSet.next()) {
+            log.debug("Adding Customer " + resultSet.getString(2));
+            htmlOutput +=
+                "<tr><td>"
+                    + Encode.forHtml(resultSet.getString(2))
+                    + "</td><td>"
+                    + Encode.forHtml(resultSet.getString(3))
+                    + "</td><td>"
+                    + Encode.forHtml(resultSet.getString(4))
+                    + "</td></tr>";
+            i++;
+          }
+          htmlOutput += "</table>";
+          if (i == 0) {
+            htmlOutput = "<p>" + bundle.getString("response.noResults") + "</p>";
+          }
         }
       } catch (SQLException e) {
         log.debug("SQL Error caught - " + e.toString());
-        htmlOutput +=
-            "<p>"
-                + errors.getString("error.detected")
-                + "</p>"
-                + "<p>"
-                + Encode.forHtml(e.toString())
-                + "</p>";
+        // Do not echo database error details back to the client
+        htmlOutput = "<p>" + errors.getString("error.detected") + "</p>";
       } catch (Exception e) {
         out.write(errors.getString("error.funky"));
         log.fatal(levelName + " - " + e.toString());

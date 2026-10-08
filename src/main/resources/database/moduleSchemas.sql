@@ -1169,7 +1169,7 @@ USE `SqlChalStoredProc`;
 CREATE PROCEDURE `SqlChalStoredProc`.`findUser` (IN theAddress VARCHAR(128))
 BEGIN
 COMMIT;
-SELECT * FROM customers WHERE customerAddress = theAddress;
+SELECT customerId, customerName, customerAddress FROM customers WHERE customerAddress = theAddress;
 END
 ;
 -- $$

@@ -102,20 +102,19 @@ public class SqlInjectionStoredProcedure extends HttpServlet {
                   + bundle.getString("response.table.name")
                   + "</th><th>"
                   + bundle.getString("response.table.address")
-                  + "</th><th>"
-                  + bundle.getString("response.table.comment")
                   + "</th></tr>";
 
           log.debug("Opening Result Set from query");
+          // Only the public contact details are shown. The internal comment column holds secrets
+          // (such as the result key) and is never sent to the client, so knowing or replaying a
+          // customer's address does not disclose it.
           while (resultSet.next()) {
-            log.debug("Adding Customer " + resultSet.getString(2));
+            log.debug("Adding Customer " + resultSet.getString("customerName"));
             htmlOutput +=
                 "<tr><td>"
-                    + Encode.forHtml(resultSet.getString(2))
+                    + Encode.forHtml(resultSet.getString("customerName"))
                     + "</td><td>"
-                    + Encode.forHtml(resultSet.getString(3))
-                    + "</td><td>"
-                    + Encode.forHtml(resultSet.getString(4))
+                    + Encode.forHtml(resultSet.getString("customerAddress"))
                     + "</td></tr>";
             i++;
           }

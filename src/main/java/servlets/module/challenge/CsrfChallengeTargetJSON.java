@@ -15,6 +15,7 @@ import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
+import utils.CsrfGuard;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -40,11 +41,26 @@ public class CsrfChallengeTargetJSON extends HttpServlet {
 
   private static final long serialVersionUID = 1L;
   private static final Logger log = LogManager.getLogger(CsrfChallengeTargetJSON.class);
+  private static final String CSRF_TOKEN_ATTRIBUTE = "csrfChallengeJsonTargetToken";
   private static String levelName = "CSRF JSON Target";
 
+  /** State changing requests must use POST. Other methods are refused without side effects. */
+  public void doGet(HttpServletRequest request, HttpServletResponse response)
+      throws ServletException, IOException {
+    ShepherdLogManager.setRequestIp(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"));
+    log.debug(levelName + " refused non POST request");
+    Locale locale = new Locale(Validate.validateLanguage(request.getSession()));
+    ResourceBundle csrfGenerics =
+        ResourceBundle.getBundle("i18n.servlets.challenges.csrf.csrfGenerics", locale);
+    response.setContentType("text/html");
+    PrintWriter out = response.getWriter();
+    out.print(getServletInfo());
+    out.write(csrfGenerics.getString("target.incrementFailed"));
+  }
+
   /**
-   * CSRF vulnerable function that can be used by users to force other users to mark their CSRF
-   * challenge as complete. Function expecting JSON formed data
+   * Increments another user's CSRF counter. Expects JSON formed data and is protected against CSRF:
+   * application/json Content-Type, same-origin and a per-session anti-CSRF token are required.
    *
    * @param userId User identifier to be incremented
    */
@@ -73,15 +89,31 @@ public class CsrfChallengeTargetJSON extends HttpServlet {
             ses.getAttribute("userName").toString());
         log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
 
-        log.debug("Getting JSON String");
-        String jsonData = extractPostRequestBody(request);
-        log.debug("POST body: " + jsonData);
-        JSONObject json = new JSONObject(jsonData);
-        log.debug("Getting userId");
-        String plusId = (String) json.get("userId");
-        log.debug("User Submitted - " + plusId);
         String userId = (String) ses.getAttribute("userStamp");
-        if (!userId.equals(plusId)) {
+        CsrfGuard.getOrCreateToken(ses, CSRF_TOKEN_ATTRIBUTE);
+        // Anti-CSRF: a cross-site HTML form can only send text/plain, urlencoded or multipart
+        // bodies, so a strict application/json Content-Type is required, together with a
+        // same-origin request and the per-session token (header or JSON field)
+        boolean csrfValid = CsrfGuard.isJsonContentType(request) && CsrfGuard.isSameOrigin(request);
+        String plusId = null;
+        if (csrfValid) {
+          log.debug("Getting JSON String");
+          String jsonData = extractPostRequestBody(request);
+          log.debug("POST body: " + jsonData);
+          JSONObject json = new JSONObject(jsonData);
+          log.debug("Getting userId");
+          plusId = json.optString("userId", null);
+          log.debug("User Submitted - " + plusId);
+          String submittedToken = request.getHeader("X-CSRF-Token");
+          if (submittedToken == null) {
+            submittedToken = json.optString("csrfToken", null);
+          }
+          csrfValid = CsrfGuard.isValidToken(ses, CSRF_TOKEN_ATTRIBUTE, submittedToken);
+        }
+        if (!csrfValid) {
+          log.debug(levelName + " request refused: bad Content-Type, origin or anti-CSRF token");
+        }
+        if (csrfValid && plusId != null && !userId.equals(plusId)) {
           String ApplicationRoot = getServletContext().getRealPath("");
           String userName = (String) ses.getAttribute("userName");
           String attackerName = Getter.getUserName(ApplicationRoot, plusId);

@@ -60,6 +60,33 @@ public class XssFilter {
   }
 
   /**
+   * Only lets well formed http(s) URLs through. The result still has to be encoded for the context
+   * it is written into.
+   *
+   * @param input
+   * @return The parsed URL, or a default link if the input was not a valid http(s) URL
+   */
+  public static String validateHttpUrl(String input) {
+    String howToMakeAUrlUrl =
+        new String("https://www.google.com/search?q=What+does+a+HTTP+link+look+like");
+    if (input == null) {
+      return howToMakeAUrlUrl;
+    }
+    input = input.toLowerCase();
+    try {
+      URL theUrl = new URL(input);
+      String protocol = theUrl.getProtocol();
+      if (protocol.equals("http") || protocol.equals("https")) {
+        return theUrl.toString();
+      }
+      log.debug("Was not a HTTP URL");
+    } catch (MalformedURLException e) {
+      log.debug("Could not Cast URL from input: " + e.toString());
+    }
+    return howToMakeAUrlUrl;
+  }
+
+  /**
    * White lists for specific URL types but doesn't sanitise it well
    *
    * @param input

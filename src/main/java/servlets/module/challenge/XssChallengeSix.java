@@ -13,6 +13,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.owasp.encoder.Encode;
 import utils.FindXSS;
 import utils.Hash;
 import utils.ShepherdLogManager;
@@ -79,8 +80,8 @@ public class XssChallengeSix extends HttpServlet {
           String userPost = new String();
           String searchTerm = request.getParameter("searchTerm");
           log.debug("User Submitted - " + searchTerm);
-          searchTerm = XssFilter.anotherBadUrlValidate(searchTerm);
-          userPost = "<a href=\"" + searchTerm + "\">Your HTTP Link!</a>";
+          searchTerm = XssFilter.validateHttpUrl(searchTerm);
+          userPost = "<a href=\"" + Encode.forHtmlAttribute(searchTerm) + "\">Your HTTP Link!</a>";
           log.debug("After Sanitising - " + searchTerm);
 
           boolean xssDetected = FindXSS.search(userPost);

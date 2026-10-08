@@ -69,26 +69,27 @@ public class PoorValidation2 extends HttpServlet {
       out.print(getServletInfo());
       String htmlOutput = new String();
       try {
-        int pineappleAmount =
+        long pineappleAmount =
             validateAmount(Integer.parseInt(request.getParameter("pineappleAmount")));
         log.debug("pineappleAmount - " + pineappleAmount);
-        int orangeAmount = validateAmount(Integer.parseInt(request.getParameter("orangeAmount")));
+        long orangeAmount = validateAmount(Integer.parseInt(request.getParameter("orangeAmount")));
         log.debug("orangeAmount - " + orangeAmount);
-        int appleAmount = validateAmount(Integer.parseInt(request.getParameter("appleAmount")));
+        long appleAmount = validateAmount(Integer.parseInt(request.getParameter("appleAmount")));
         log.debug("appleAmount - " + appleAmount);
-        int bananaAmount = validateAmount(Integer.parseInt(request.getParameter("bananaAmount")));
+        long bananaAmount = validateAmount(Integer.parseInt(request.getParameter("bananaAmount")));
         log.debug("bananaAmount - " + bananaAmount);
 
         // Working out costs
-        int pineappleCost = pineappleAmount * 30;
-        int orangeCost = orangeAmount * 3000;
-        int appleCost = appleAmount * 45;
-        int bananaCost = bananaAmount * 15;
+        // Costs are worked out as longs so a huge amount can't overflow into a negative total
+        long pineappleCost = pineappleAmount * 30;
+        long orangeCost = orangeAmount * 3000;
+        long appleCost = appleAmount * 45;
+        long bananaCost = bananaAmount * 15;
 
         htmlOutput = new String();
 
         // Work Out Final Cost
-        int finalCost = pineappleCost + orangeCost + bananaCost + appleCost;
+        long finalCost = pineappleCost + orangeCost + bananaCost + appleCost;
 
         // Output Order
         htmlOutput =

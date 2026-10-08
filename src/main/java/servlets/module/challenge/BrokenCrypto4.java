@@ -7,8 +7,12 @@ import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.ResourceBundle;
+import java.util.Set;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -47,6 +51,18 @@ public class BrokenCrypto4 extends HttpServlet {
   private static final long serialVersionUID = 1L;
   private static final Logger log = LogManager.getLogger(BrokenCrypto4.class);
 
+  /*
+   * Coupon codes that were shipped to every browser inside couponCheck.js, "protected" only by
+   * DES with a key that sat right next to them in the same script. Anybody could decrypt that list,
+   * so those codes are compromised and are no longer honoured. Coupons are now only checked on the
+   * server and the client script no longer carries any coupon data.
+   */
+  private static final Set<Integer> REVOKED_COUPON_IDS =
+      Collections.unmodifiableSet(new HashSet<Integer>(Arrays.asList(432197)));
+  private static final Set<String> REVOKED_COUPON_CODES =
+      Collections.unmodifiableSet(new HashSet<String>(Arrays.asList("e!c!3etzoumo@stu4ru176")));
+  private static final int MAX_COUPON_LENGTH = 128;
+
   public void doPost(HttpServletRequest request, HttpServletResponse response)
       throws ServletException, IOException {
     // Setting IpAddress To Log and taking header for original IP if forwarded from
@@ -82,6 +98,9 @@ public class BrokenCrypto4 extends HttpServlet {
         log.debug("bananaAmount - " + bananaAmount);
         String couponCode = request.getParameter("couponCode");
         log.debug("couponCode - " + couponCode);
+        if (couponCode == null || couponCode.length() > MAX_COUPON_LENGTH) {
+          couponCode = "";
+        }
 
         // Working out costs
         int pineappleCost = pineappleAmount * 30;
@@ -94,45 +113,54 @@ public class BrokenCrypto4 extends HttpServlet {
         int perCentOffBanana = 0; // Will search for coupons in DB and update this int
 
         htmlOutput = new String();
-        Connection conn = Database.getChallengeConnection(applicationRoot, "CryptoChallengeShop");
-        log.debug("Looking for Coupons");
-        PreparedStatement prepstmt =
-            conn.prepareStatement("SELECT itemId, perCentOff FROM coupons WHERE couponCode = ?");
-        prepstmt.setString(1, couponCode);
-        ResultSet coupons = prepstmt.executeQuery();
-        try {
-          if (coupons.next()) {
-            if (coupons.getInt(1) == 1) // Pineapple
-            {
-              log.debug("Found coupon for %" + coupons.getInt(2) + " off Pineapple");
-              perCentOffPineapple = coupons.getInt(2);
-            } else if (coupons.getInt(1) == 2) // Orange
-            {
-              log.debug("Found coupon for %" + coupons.getInt(2) + " off Orange");
-              perCentOffOrange = coupons.getInt(2);
-            } else if (coupons.getInt(1) == 3) // Apple
-            {
-              log.debug("Found coupon for %" + coupons.getInt(2) + " off Apple");
-              perCentOffApple = coupons.getInt(2);
-            } else if (coupons.getInt(1) == 4) // Banana
-            {
-              log.debug("Found coupon for %" + coupons.getInt(2) + " off Banana");
-              perCentOffBanana = coupons.getInt(2);
+        if (isRevokedCode(couponCode)) {
+          log.debug("Revoked coupon code submitted");
+        } else {
+          try (Connection conn =
+              Database.getChallengeConnection(applicationRoot, "CryptoChallengeShop")) {
+            log.debug("Looking for Coupons");
+            PreparedStatement prepstmt =
+                conn.prepareStatement(
+                    "SELECT couponId, itemId, perCentOff, couponCode FROM coupons"
+                        + " WHERE couponCode = ?");
+            prepstmt.setString(1, couponCode);
+            ResultSet coupons = prepstmt.executeQuery();
+            if (coupons.next()) {
+              int perCentOff = Math.max(0, Math.min(100, coupons.getInt(3)));
+              if (REVOKED_COUPON_IDS.contains(coupons.getInt(1))
+                  || isRevokedCode(coupons.getString(4))) {
+                log.debug("Revoked coupon matched, ignoring it");
+              } else if (coupons.getInt(2) == 1) // Pineapple
+              {
+                log.debug("Found coupon for %" + perCentOff + " off Pineapple");
+                perCentOffPineapple = perCentOff;
+              } else if (coupons.getInt(2) == 2) // Orange
+              {
+                log.debug("Found coupon for %" + perCentOff + " off Orange");
+                perCentOffOrange = perCentOff;
+              } else if (coupons.getInt(2) == 3) // Apple
+              {
+                log.debug("Found coupon for %" + perCentOff + " off Apple");
+                perCentOffApple = perCentOff;
+              } else if (coupons.getInt(2) == 4) // Banana
+              {
+                log.debug("Found coupon for %" + perCentOff + " off Banana");
+                perCentOffBanana = perCentOff;
+              }
+            } else {
+              log.debug("Invalid Coupon Code");
             }
-          } else {
-            log.debug("Invalid Coupon Code");
+          } catch (Exception e) {
+            log.debug("Could Not Find Coupon: " + e.toString());
           }
-        } catch (Exception e) {
-          log.debug("Could Not Find Coupon: " + e.toString());
         }
-        conn.close();
 
         // Work Out Final Cost
-        pineappleCost = pineappleCost - (pineappleCost * (perCentOffPineapple / 100));
-        appleCost = appleCost - (appleCost * (perCentOffApple / 100));
-        bananaCost = bananaCost - (bananaCost * (perCentOffBanana / 100));
-        orangeCost = orangeCost - (orangeCost * (perCentOffOrange / 100));
-        int finalCost = pineappleCost + appleCost + bananaAmount + orangeCost;
+        pineappleCost = pineappleCost - (int) ((long) pineappleCost * perCentOffPineapple / 100);
+        appleCost = appleCost - (int) ((long) appleCost * perCentOffApple / 100);
+        bananaCost = bananaCost - (int) ((long) bananaCost * perCentOffBanana / 100);
+        orangeCost = orangeCost - (int) ((long) orangeCost * perCentOffOrange / 100);
+        int finalCost = pineappleCost + appleCost + bananaCost + orangeCost;
 
         // Output Order
         htmlOutput =
@@ -163,15 +191,14 @@ public class BrokenCrypto4 extends HttpServlet {
         log.debug("Didn't complete order: " + e.toString());
         htmlOutput += "<p>" + bundle.getString("insecureCryptoStorage.4.orderFailed") + "</p>";
       }
-      try {
-        Thread.sleep(1000);
-      } catch (Exception e) {
-        log.error("Failed to Pause: " + e.toString());
-      }
       out.write(htmlOutput);
     } else {
       log.error(levelName + " servlet accessed with no session");
     }
+  }
+
+  private static boolean isRevokedCode(String code) {
+    return code != null && REVOKED_COUPON_CODES.contains(code.trim().toLowerCase(Locale.ROOT));
   }
 
   private static int validateAmount(int amount) {

@@ -47,6 +47,12 @@ public class SessionManagement3 extends HttpServlet {
       "t193c6634f049bcf65cdcac72269eeac25dbb2a6887bdb38873e57d0ef447bc3";
   private static String levelResult = "e62008dc47f5eb065229d48963";
 
+  /**
+   * Session attribute holding the sub application user that signed in during this session. The
+   * change password function only ever acts on this account.
+   */
+  public static final String SIGNED_IN_USER = "sessionManagement3SignedInUser";
+
   public static String getLevelHash() {
     return levelHash;
   }
@@ -132,6 +138,7 @@ public class SessionManagement3 extends HttpServlet {
             ResultSet resultSet2 = callstmt.executeQuery();
             if (resultSet2.next()) {
               log.debug("Successful Admin Login");
+              ses.setAttribute(SIGNED_IN_USER, resultSet2.getString(1));
               // Get key and add it to the output
               String userKey =
                   Hash.generateUserSolution(levelResult, (String) ses.getAttribute("userName"));
@@ -158,6 +165,7 @@ public class SessionManagement3 extends HttpServlet {
             }
           } else {
             log.debug("Successful Guest Login");
+            ses.setAttribute(SIGNED_IN_USER, resultSet.getString(1));
             htmlOutput =
                 makeTable(bundle)
                     + "<h2 class='title'>"

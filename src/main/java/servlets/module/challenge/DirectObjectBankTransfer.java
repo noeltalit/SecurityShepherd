@@ -73,17 +73,43 @@ public class DirectObjectBankTransfer extends HttpServlet {
       String errorMessage = new String();
       String applicationRoot = getServletContext().getRealPath("");
       try {
-        String senderAccountNumber = request.getParameter("senderAccountNumber");
-        log.debug("Sender Account Number - " + senderAccountNumber);
+        // The sending account is the one signed in to the bank session. The sender account number
+        // submitted by the client is never trusted to choose whose money is moved.
+        Object sessionAccount = ses.getAttribute("directObjectBankAccount");
+        String requestedSender = request.getParameter("senderAccountNumber");
+        log.debug("Sender Account Number - " + requestedSender);
+        String senderAccountNumber = sessionAccount == null ? null : sessionAccount.toString();
         String receiverAccountNumber = request.getParameter("receiverAccountNumber");
+        if (receiverAccountNumber == null) {
+          receiverAccountNumber = request.getParameter("ReceiverAccountNumber");
+        }
+        if (receiverAccountNumber != null) {
+          receiverAccountNumber = receiverAccountNumber.trim();
+        }
         log.debug("Receiver Account Number - " + receiverAccountNumber);
         String transferAmountString = request.getParameter("transferAmount");
         log.debug("Transfer Amount - " + transferAmountString);
-        float tranferAmount = Float.parseFloat(transferAmountString);
+        float tranferAmount = 0;
+        try {
+          tranferAmount = Float.parseFloat(transferAmountString);
+        } catch (Exception e) {
+          log.debug("Invalid transfer amount submitted");
+        }
 
         // Data Validation
-        // Positive Transfer Amount?
-        if (tranferAmount > 0) {
+        if (senderAccountNumber == null) {
+          log.debug("Transfer attempted without a bank session");
+          errorMessage = bundle.getString("bank.error.notSignedIn");
+        } else if (requestedSender != null
+            && !requestedSender.trim().isEmpty()
+            && !requestedSender.trim().equals(senderAccountNumber)) {
+          log.warn("Transfer from another bank account attempted: " + requestedSender);
+          errorMessage = bundle.getString("bank.error.notYourAccount");
+        } else if (receiverAccountNumber == null
+            || receiverAccountNumber.isEmpty()
+            || receiverAccountNumber.equals(senderAccountNumber)) {
+          errorMessage = bundle.getString("transfer.error.receiverNotFound");
+        } else if (tranferAmount > 0 && !Float.isInfinite(tranferAmount)) {
           // Sender Account Has necessary funds?
           long senderFunds =
               DirectObjectBankLogin.getAccountBalance(senderAccountNumber, applicationRoot);

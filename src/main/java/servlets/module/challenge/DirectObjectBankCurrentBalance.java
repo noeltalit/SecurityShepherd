@@ -67,14 +67,27 @@ public class DirectObjectBankCurrentBalance extends HttpServlet {
       PrintWriter out = response.getWriter();
       out.print(getServletInfo());
       try {
-        String accountNumber = request.getParameter("accountNumber");
-        log.debug("Account Number - " + accountNumber);
-        String applicationRoot = getServletContext().getRealPath("");
+        // The account is taken from the bank session established at sign in. The account number
+        // submitted by the client is never trusted to choose which account is read.
+        Object sessionAccount = ses.getAttribute("directObjectBankAccount");
+        String requestedAccount = request.getParameter("accountNumber");
+        log.debug("Account Number - " + requestedAccount);
         String htmlOutput = new String();
-        long currentBalance =
-            DirectObjectBankLogin.getAccountBalance(accountNumber, applicationRoot);
+        if (sessionAccount == null) {
+          log.debug("Balance requested without a bank session");
+          htmlOutput = bundle.getString("bank.error.notSignedIn");
+        } else if (requestedAccount != null
+            && !requestedAccount.trim().isEmpty()
+            && !requestedAccount.trim().equals(sessionAccount.toString())) {
+          log.warn("Balance of another bank account requested: " + requestedAccount);
+          htmlOutput = bundle.getString("bank.error.notYourAccount");
+        } else {
+          String applicationRoot = getServletContext().getRealPath("");
+          long currentBalance =
+              DirectObjectBankLogin.getAccountBalance(sessionAccount.toString(), applicationRoot);
+          htmlOutput = Long.toString(currentBalance);
+        }
         log.debug("Outputting HTML");
-        htmlOutput = Long.toString(currentBalance);
         out.write(htmlOutput);
       } catch (SQLException e) {
         out.write(

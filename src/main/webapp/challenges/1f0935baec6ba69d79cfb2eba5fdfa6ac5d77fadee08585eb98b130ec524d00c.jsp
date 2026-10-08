@@ -253,7 +253,7 @@ if (request.getSession() != null)
 			
 			function transferFunds(){
 				console.log("Transfering Funds");
-				var theReceiverNumber = $("#ReceiverAccountNumber").val();
+				var theReceiverNumber = $("#receiverAccountNumber").val();
 				console.log("theReceiverNumber: " + theReceiverNumber);
 				var theSenderNumber = $("#currentAccountNumber").val();
 				console.log("theSenderNumber: " + theSenderNumber);
@@ -272,7 +272,7 @@ if (request.getSession() != null)
 						url: "<%= levelHash %>Transfer",
 						data: {
 							senderAccountNumber: theSenderNumber, 
-							ReceiverAccountNumber: theReceiverNumber,
+							receiverAccountNumber: theReceiverNumber,
 							transferAmount: theTransferAmount
 						},
 						async: false

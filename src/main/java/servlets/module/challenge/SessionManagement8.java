@@ -1,19 +1,16 @@
 package servlets.module.challenge;
 
-import dbProcs.Getter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import javax.servlet.ServletException;
-import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -79,46 +76,10 @@ public class SessionManagement8 extends HttpServlet {
             request.getHeader("X-Forwarded-For"),
             ses.getAttribute("userName").toString());
         log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
-        Cookie userCookies[] = request.getCookies();
-        int i = 0;
-        Cookie theCookie = null;
-        for (i = 0; i < userCookies.length; i++) {
-          if (userCookies[i].getName().compareTo("challengeRole") == 0) {
-            theCookie = userCookies[i];
-            break; // End Loop, because we found the token
-          }
-        }
+        // The role is never read from the client. The "challengeRole" cookie is only ATOM-128
+        // encoded, so anyone can decode it and encode "superuser" in its place. There is no
+        // server side super user session for this sub application, so nobody is granted access.
         String htmlOutput = new String();
-        if (theCookie != null) {
-          log.debug("Cookie value: " + theCookie.getValue());
-
-          if (theCookie.getValue().equals("nmHqLjQknlHs")) {
-            log.debug("Super User Cookie detected");
-            // Get key and add it to the output
-            String userKey =
-                Hash.generateUserSolution(
-                    Getter.getModuleResultFromHash(getServletContext().getRealPath(""), levelHash),
-                    (String) ses.getAttribute("userName"));
-            htmlOutput =
-                "<h2 class='title'>"
-                    + bundle.getString("response.superUserClub")
-                    + "</h2>"
-                    + "<p>"
-                    + bundle.getString("response.welcomeSuperUser")
-                    + " "
-                    + "<a>"
-                    + userKey
-                    + "</a>"
-                    + "</p>";
-          } else if (!theCookie.getValue().equals("LmH6nmbC")) {
-            log.debug("Tampered role cookie detected: " + theCookie.getValue());
-            htmlOutput += "<!-- " + bundle.getString("response.invalidRole") + " -->";
-          } else {
-            log.debug("No change to role cookie submitted");
-          }
-        } else {
-          log.debug("No Role Cookie Submitted");
-        }
         if (htmlOutput.isEmpty()) {
           log.debug("Challenge Not Complete");
           boolean hackDetected = false;

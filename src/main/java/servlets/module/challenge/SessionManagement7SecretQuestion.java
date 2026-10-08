@@ -1,7 +1,6 @@
 package servlets.module.challenge;
 
 import dbProcs.Database;
-import dbProcs.Getter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
@@ -19,8 +18,6 @@ import javax.servlet.http.HttpSession;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.owasp.encoder.Encode;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -119,22 +116,14 @@ public class SessionManagement7SecretQuestion extends HttpServlet {
               ResultSet rs = callstmt.executeQuery();
               if (rs.next()) {
                 log.debug("Correct Answer Submitted");
-                // Get key and add it to the output
-                String userKey =
-                    Hash.generateUserSolution(
-                        Getter.getModuleResultFromHash(ApplicationRoot, levelHash),
-                        (String) ses.getAttribute("userName"));
+                // A secret answer is not a password and must not sign anybody in. There are only a
+                // handful of possible flowers, so the answer can simply be guessed. A correct
+                // answer only sends a reset link to the account's own email address.
                 htmlOutput =
                     "<h2 class='title'>"
-                        + bundle.getString("response.welcome")
-                        + " "
-                        + Encode.forHtml(rs.getString(1))
-                        + "</h2>"
-                        + "<p>"
-                        + bundle.getString("response.resultKey")
-                        + " <a>"
-                        + userKey
-                        + "</a>"
+                        + bundle.getString("question.resetSentTitle")
+                        + "</h2><p>"
+                        + bundle.getString("question.resetSent")
                         + "</p>";
               } else {
                 log.debug("Bad Answer Submitted");

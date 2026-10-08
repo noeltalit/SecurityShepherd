@@ -110,10 +110,14 @@ public class SessionManagement2 extends HttpServlet {
         callstmt.execute();
         log.debug("Changes committed.");
 
+        // Every password the old reset function set was also sent back in its HTTP response, so
+        // all of them are compromised. Those passwords were stored as unsalted SHA-1 hashes; by
+        // only accepting SHA-256 hashes, any password handed out that way can no longer be used to
+        // sign in, even on a database that still holds the values it wrote.
         callstmt =
             conn.prepareStatement(
                 "SELECT userName, userAddress FROM users WHERE userName = ? AND userPassword ="
-                    + " SHA(?)");
+                    + " SHA2(?, 256)");
         callstmt.setString(1, subName);
         callstmt.setString(2, subPass);
         log.debug("Executing authUser");

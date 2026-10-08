@@ -128,33 +128,6 @@ if (request.getSession() != null)
 				});
 			});
 			
-			$("#leAdminForm").submit(function(){
-				$("#submitButton").hide("fast");
-				$("#loadingSign").show("slow");
-				$("#resultsDiv").hide("slow", function(){
-					var ajaxCall = $.ajax({
-						type: "POST",
-						url: "<%= levelHash %>2",
-						data: {
-							userData: "4816283", 
-						},
-						async: false
-					});
-					if(ajaxCall.status == 200)
-					{
-						$("#resultsDiv").html(ajaxCall.responseText);
-					}
-					else
-					{
-						$("#resultsDiv").html("<p> <%= bundle.getString("error.occurred") %>: " + ajaxCall.status + " " + ajaxCall.statusText + "</p>");
-					}
-					$("#resultsDiv").show("slow", function(){
-						$("#loadingSign").hide("fast", function(){
-							$("#submitButton").show("slow");
-						});
-					});
-				});
-			});
 		</script>
 	<% if(Analytics.googleAnalyticsOn) { %><%= Analytics.googleAnalyticsScript %>
 	<% } %>

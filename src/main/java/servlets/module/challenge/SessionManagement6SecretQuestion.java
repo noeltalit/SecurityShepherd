@@ -1,7 +1,6 @@
 package servlets.module.challenge;
 
 import dbProcs.Database;
-import dbProcs.Getter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
@@ -20,7 +19,6 @@ import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.owasp.encoder.Encode;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -105,22 +103,15 @@ public class SessionManagement6SecretQuestion extends HttpServlet {
             ResultSet rs = callstmt.executeQuery();
             if (rs.next()) {
               log.debug("Correct Answer Submitted");
-              // Get key and add it to the output
-              String userKey =
-                  Hash.generateUserSolution(
-                      Getter.getModuleResultFromHash(ApplicationRoot, levelHash),
-                      (String) ses.getAttribute("userName"));
+              // A secret answer is not a password and must not sign anybody in. Personal answers
+              // like these can be researched or guessed, and they were also readable through the
+              // question lookup. A correct answer only sends a reset link to the account's own
+              // email address.
               htmlOutput =
                   "<h2 class='title'>"
-                      + bundle.getString("response.welcome")
-                      + " "
-                      + Encode.forHtml(rs.getString(1))
-                      + "</h2>"
-                      + "<p>"
-                      + bundle.getString("response.welcome")
-                      + " <a>"
-                      + userKey
-                      + "</a>"
+                      + bundle.getString("question.resetSentTitle")
+                      + "</h2><p>"
+                      + bundle.getString("question.resetSent")
                       + "</p>";
             } else {
               log.debug("Bad Answer Submitted");
@@ -225,10 +216,8 @@ public class SessionManagement6SecretQuestion extends HttpServlet {
                         ApplicationRoot, "BrokenAuthAndSessMangChalSix");
                 log.debug("Getting Secret Question");
                 PreparedStatement callstmt =
-                    conn.prepareStatement(
-                        "SELECT secretQuestion FROM users WHERE userAddress = \""
-                            + subEmail
-                            + "\"");
+                    conn.prepareStatement("SELECT secretQuestion FROM users WHERE userAddress = ?");
+                callstmt.setString(1, subEmail);
                 ResultSet rs = callstmt.executeQuery();
                 if (rs.next()) {
                   log.debug("'Valid' User Detected");
@@ -245,8 +234,8 @@ public class SessionManagement6SecretQuestion extends HttpServlet {
               }
             } catch (SQLException e) {
               log.debug(levelName + " SQL Error: " + e.toString());
-              log.debug("Outputting error to user");
-              htmlOutput = new String(e.toString());
+              // Database errors are not shown to the user
+              htmlOutput = bundle.getString("question.noQuestion");
             }
           } else {
             log.debug("Tampered cookie detected");

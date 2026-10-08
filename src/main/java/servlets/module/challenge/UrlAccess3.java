@@ -3,6 +3,7 @@ package servlets.module.challenge;
 import dbProcs.Getter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import javax.servlet.ServletException;
@@ -14,6 +15,7 @@ import javax.servlet.http.HttpSession;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.owasp.encoder.Encode;
 import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
@@ -43,16 +45,34 @@ public class UrlAccess3 extends HttpServlet {
   private static String levelName = "Failure to Restrict URL Access 3";
   private static String levelHash =
       "e40333fc2c40b8e0169e433366350f55c77b82878329570efa894838980de5b4";
+  private static final String GUEST = "aGuest";
+  private static final String SUPER_ADMIN = "MrJohnReillyTheSecond";
+
+  /** Session attribute holding the server side identity of the player in this sub application. */
+  static final String CURRENT_PERSON_ATTRIBUTE = "urlAccess3CurrentPerson";
 
   /**
-   * Users must take advance of the broken session management in this application by modifying the
-   * tracking cookie "currentPerson" which is encoded in Base64. They must modify this cookie to be
-   * equal a super admin to access the result key.
+   * Returns the identity of the player in this sub application from the server side session,
+   * defaulting to (and storing) the guest identity. It is never taken from client input.
+   */
+  static String getCurrentPerson(HttpSession ses) {
+    Object currentPerson = ses.getAttribute(CURRENT_PERSON_ATTRIBUTE);
+    if (currentPerson == null) {
+      ses.setAttribute(CURRENT_PERSON_ATTRIBUTE, GUEST);
+      return GUEST;
+    }
+    return currentPerson.toString();
+  }
+
+  /**
+   * The player's role in this sub application is held in the server side session. The
+   * "currentPerson" cookie (Base64) is not trusted: a cookie naming anyone other than the session
+   * identity is refused with 403.
    *
    * @param userId Red herring that is pre set to d3d9446802a44259755d38e6d163e820
    * @param secure Red herring that is pre set to true
    * @param adminDetected Red herring
-   * @param currentPerson Cookie encoded base64 that manages who is signed in to the sub schema
+   * @param currentPerson Cookie encoded base64, ignored for authorization
    */
   public void doPost(HttpServletRequest request, HttpServletResponse response)
       throws ServletException, IOException {
@@ -78,48 +98,50 @@ public class UrlAccess3 extends HttpServlet {
             request.getHeader("X-Forwarded-For"),
             ses.getAttribute("userName").toString());
         log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
-        Cookie userCookies[] = request.getCookies();
-        int i = 0;
-        Cookie theCookie = null;
-        for (i = 0; i < userCookies.length; i++) {
-          if (userCookies[i].getName().compareTo("currentPerson") == 0) {
-            theCookie = userCookies[i];
-            break; // End Loop, because we found the token
+        // Who the player is in this sub application is decided on the server. The
+        // "currentPerson" cookie is only a display hint set by the page and is never trusted to
+        // grant a role; nothing in this challenge ever promotes a player above a guest.
+        String currentPerson = getCurrentPerson(ses);
+        String claimedPerson = null;
+        Cookie[] userCookies = request.getCookies();
+        if (userCookies != null) {
+          for (Cookie userCookie : userCookies) {
+            if ("currentPerson".equals(userCookie.getName())) {
+              claimedPerson =
+                  new String(Base64.decodeBase64(userCookie.getValue()), StandardCharsets.UTF_8);
+              break; // End Loop, because we found the token
+            }
           }
         }
         String htmlOutput = null;
-        if (theCookie != null) {
-          log.debug("Cookie value: " + theCookie.getValue());
-          byte[] decodedCookieBytes = Base64.decodeBase64(theCookie.getValue());
-          String decodedCookie = new String(decodedCookieBytes, "UTF-8");
-          log.debug("Decoded Cookie: " + decodedCookie);
-
-          if (decodedCookie.equals("MrJohnReillyTheSecond")) {
-            log.debug("Super Admin Cookie detected");
-            // Get key and add it to the output
-            String userKey =
-                Hash.generateUserSolution(
-                    Getter.getModuleResultFromHash(getServletContext().getRealPath(""), levelHash),
-                    (String) ses.getAttribute("userName"));
-            htmlOutput =
-                "<h2 class='title'>"
-                    + bundle.getString("admin.superAdminClub")
-                    + "</h2>"
-                    + "<p>"
-                    + bundle.getString("admin.superAdminClub.keyMessage")
-                    + " "
-                    + "<a>"
-                    + userKey
-                    + "</a>"
-                    + "</p>";
-          } else if (!decodedCookie.equals("aGuest")) {
-            log.debug("Tampered role cookie detected: " + decodedCookie);
-            htmlOutput = "<!-- " + bundle.getString("response.invalidUser") + " -->";
-          } else {
-            log.debug("No change to role cookie submitted");
-          }
-        } else {
-          log.debug("No Role Cookie Submitted");
+        if (claimedPerson != null && !claimedPerson.equals(currentPerson)) {
+          log.warn("Tampered role cookie rejected for " + ses.getAttribute("userName"));
+          response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+          htmlOutput =
+              "<h2 class='title'>"
+                  + bundle.getString("response.accessDenied")
+                  + "</h2>"
+                  + "<p>"
+                  + bundle.getString("response.accessDenied.message")
+                  + "</p>";
+        } else if (SUPER_ADMIN.equals(currentPerson)) {
+          log.debug("Super Admin session detected");
+          // Get key and add it to the output
+          String userKey =
+              Hash.generateUserSolution(
+                  Getter.getModuleResultFromHash(getServletContext().getRealPath(""), levelHash),
+                  (String) ses.getAttribute("userName"));
+          htmlOutput =
+              "<h2 class='title'>"
+                  + bundle.getString("admin.superAdminClub")
+                  + "</h2>"
+                  + "<p>"
+                  + bundle.getString("admin.superAdminClub.keyMessage")
+                  + " "
+                  + "<a>"
+                  + Encode.forHtml(userKey)
+                  + "</a>"
+                  + "</p>";
         }
         if (htmlOutput == null) {
           log.debug("Challenge Not Complete");

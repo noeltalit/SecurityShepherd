@@ -1,23 +1,16 @@
 package servlets.module.challenge;
 
-import dbProcs.Database;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import javax.servlet.ServletException;
-import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
-import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.owasp.encoder.Encode;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -57,7 +50,8 @@ public class UrlAccess3UserList extends HttpServlet {
 
     // Translation Stuff
     Locale locale = new Locale(Validate.validateLanguage(request.getSession()));
-    ResourceBundle errors = ResourceBundle.getBundle("i18n.servlets.errors", locale);
+    ResourceBundle bundle =
+        ResourceBundle.getBundle("i18n.servlets.challenges.urlAccess.urlAccess3", locale);
 
     if (Validate.validateSession(ses)) {
       ShepherdLogManager.setRequestIp(
@@ -67,47 +61,19 @@ public class UrlAccess3UserList extends HttpServlet {
       log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
       PrintWriter out = response.getWriter();
       out.print(getServletInfo());
-      String htmlOutput = new String();
-
-      try {
-        Cookie userCookies[] = request.getCookies();
-        int i = 0;
-        Cookie theCookie = null;
-        for (i = 0; i < userCookies.length; i++) {
-          if (userCookies[i].getName().compareTo("currentPerson") == 0) {
-            theCookie = userCookies[i];
-            break; // End Loop, because we found the token
-          }
-        }
-        String currentUser = new String("aGuest");
-        if (theCookie != null) {
-          log.debug("Cookie value: " + theCookie.getValue());
-          byte[] decodedCookieBytes = Base64.decodeBase64(theCookie.getValue());
-          String decodedCookie = new String(decodedCookieBytes, "UTF-8");
-          log.debug("Decoded Cookie: " + decodedCookie);
-          currentUser = decodedCookie;
-        }
-        String ApplicationRoot = getServletContext().getRealPath("");
-        Connection conn = Database.getChallengeConnection(ApplicationRoot, "UrlAccessThree");
-        PreparedStatement callstmt;
-        callstmt =
-            conn.prepareStatement(
-                "SELECT userName FROM users WHERE userRole = \"admin\" OR userName = \""
-                    + currentUser
-                    + "\";");
-        log.debug("Getting User List");
-        htmlOutput = new String();
-        ResultSet rs = callstmt.executeQuery();
-        while (rs.next()) {
-          htmlOutput += Encode.forHtml(rs.getString(1)) + "<br>";
-          if (rs.getString(1).equalsIgnoreCase("MrJohnReillyTheSecond")) {
-            log.debug("Super Admin contained in response");
-          }
-        }
-      } catch (Exception e) {
-        htmlOutput = new String(errors.getString("error.funky"));
-        log.fatal(levelName + " - " + e.toString());
-      }
+      // The user list exposes the administrators of this sub application and is restricted to
+      // them. The caller's identity comes from the server side session (never from the
+      // "currentPerson" cookie) and no player is an administrator, so the request is refused.
+      String currentPerson = UrlAccess3.getCurrentPerson(ses);
+      log.warn(levelName + " denied to " + ses.getAttribute("userName") + " as " + currentPerson);
+      response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+      String htmlOutput =
+          "<h2 class='title'>"
+              + bundle.getString("response.accessDenied")
+              + "</h2>"
+              + "<p>"
+              + bundle.getString("response.accessDenied.message")
+              + "</p>";
       log.debug("Outputting HTML");
       out.write(htmlOutput);
     } else {

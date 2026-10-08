@@ -5,15 +5,12 @@ import java.io.PrintWriter;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import javax.servlet.ServletException;
-import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
-import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -42,7 +39,6 @@ public class SessionManagement1 extends HttpServlet {
   private static String levelName = "Session Management Challenge One";
   public static String levelHash =
       "dfd6bfba1033fa380e378299b6a998c759646bd8aea02511482b8ce5d707f93a";
-  private static String levelResult = "db7b1da5d7a43c7100a6f01bb0c";
 
   /**
    * Users must take advance of the broken session management in this application by modifying the
@@ -77,39 +73,10 @@ public class SessionManagement1 extends HttpServlet {
             request.getHeader("X-Forwarded-For"),
             ses.getAttribute("userName").toString());
         log.debug(levelName + " servlet accessed by: " + ses.getAttribute("userName").toString());
-        Cookie userCookies[] = request.getCookies();
-        int i = 0;
-        Cookie theCookie = null;
-        for (i = 0; i < userCookies.length; i++) {
-          if (userCookies[i].getName().compareTo("checksum") == 0) {
-            theCookie = userCookies[i];
-            break; // End Loop, because we found the token
-          }
-        }
+        // The role is never read from the client. The "checksum" cookie is just base64 that
+        // anyone can rewrite, so it can't be trusted to say who is an administrator. There is no
+        // server side administrator session for this sub application, so nobody is granted access.
         String htmlOutput = null;
-        if (theCookie != null) {
-          log.debug("Cookie value: " + theCookie.getValue());
-          byte[] decodedCookieBytes = Base64.decodeBase64(theCookie.getValue());
-          String decodedCookie = new String(decodedCookieBytes, "UTF-8");
-          log.debug("Decoded Cookie: " + decodedCookie);
-
-          if (decodedCookie.equals("userRole=administrator")) {
-            log.debug("Challenge Complete");
-            // Get key and add it to the output
-            String userKey =
-                Hash.generateUserSolution(levelResult, (String) ses.getAttribute("userName"));
-            htmlOutput =
-                "<h2 class='title'>"
-                    + bundle.getString("response.adminClub")
-                    + "</h2>"
-                    + "<p>"
-                    + bundle.getString("response.welcomeAdmin")
-                    + "<a>"
-                    + userKey
-                    + "</a>"
-                    + "</p>";
-          }
-        }
         if (htmlOutput == null) {
           log.debug("Challenge Not Complete");
           boolean hackDetected = false;

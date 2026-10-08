@@ -212,13 +212,14 @@ SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;
 -- -----------------------------------------------------
 -- Data for table `BrokenAuthAndSessMangChalTwo`.`users`
 -- -----------------------------------------------------
+-- Passwords are salted Argon2id hashes of long random values that were never recorded
 START TRANSACTION;
 USE `BrokenAuthAndSessMangChalTwo`;
-INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (12, 'admin', 'default', 'zoidberg22@shepherd.com');
-INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (321, 'administrator', 'default', 'buzzthebald@shepherd.com');
-INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (3212, 'root', 'default', 'elitehacker@shepherd.com');
-INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (634, 'superuser', 'default', 'superman@security.com');
-INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (4524, 'privileged', 'default', 'spoiltbrat@security.com');
+INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (12, 'admin', '$argon2id$v=19$m=65536,t=3,p=1$Hk8rBE1QEHDr82LV4lhoZw$mJSZ+rVDwfhYmaOUVW9wqMDfi48isVhRcQt8XOul7W4', 'zoidberg22@shepherd.com');
+INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (321, 'administrator', '$argon2id$v=19$m=65536,t=3,p=1$RIiI5EtnJiTs/2WiYiAn4A$Xfp1YuoQaBr5bWbMh+Pa3taGZKsCSBE5iCmG5IKGyFo', 'buzzthebald@shepherd.com');
+INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (3212, 'root', '$argon2id$v=19$m=65536,t=3,p=1$m1ruVIrYEwSMu60D9lKxxA$UDkD6Mtt+BUdfe3Ob5Xeor4HF9RXX+JIl99DZjfonts', 'elitehacker@shepherd.com');
+INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (634, 'superuser', '$argon2id$v=19$m=65536,t=3,p=1$J4dGJI8Y9rB5NSQmZnybyA$uWNZq7vL4k6dx7/HnzTlxG25uM13oKlyOqy1pmFGY+4', 'superman@security.com');
+INSERT INTO `BrokenAuthAndSessMangChalTwo`.`users` (`userId`, `userName`, `userPassword`, `userAddress`) VALUES (4524, 'privileged', '$argon2id$v=19$m=65536,t=3,p=1$G2jeMyTgT2VnQc6ctkJYhQ$s8zMPTc3aqoLA0+VEGuvENuTWbfU85Fz9QBZP9mjCPY', 'spoiltbrat@security.com');
 
 COMMIT;
 

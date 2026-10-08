@@ -1,14 +1,27 @@
 package servlets.module.challenge;
 
+import dbProcs.Database;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Base64;
 import java.util.Locale;
+import java.util.Map;
 import java.util.ResourceBundle;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import utils.ShepherdLogManager;
@@ -40,13 +53,43 @@ public class SessionManagement2ChangePassword extends HttpServlet {
   public static String levelHash =
       "f5ddc0ed2d30e597ebacf5fdd117083674b19bb92ffc3499121b9e6a12c92959";
 
+  /** How long a reset token stays valid for, in milliseconds */
+  private static final long TOKEN_LIFE_MS = 15 * 60 * 1000;
+
+  private static final int MIN_PASSWORD_LENGTH = 12;
+  private static final int MAX_PASSWORD_LENGTH = 128;
+
+  /** At most this many reset requests per address within the window */
+  private static final int MAX_RESET_REQUESTS = 3;
+
+  private static final long RESET_WINDOW_MS = 15 * 60 * 1000;
+
+  private static final SessionManagement2.AttemptLimiter resetRequests =
+      new SessionManagement2.AttemptLimiter(MAX_RESET_REQUESTS, RESET_WINDOW_MS);
+
+  /** Invalid token submissions, so reset tokens cannot be guessed online */
+  private static final SessionManagement2.AttemptLimiter tokenFailures =
+      new SessionManagement2.AttemptLimiter(20, RESET_WINDOW_MS);
+
+  private static final SecureRandom random = new SecureRandom();
+
   /**
-   * A user with the submitted email address is set a new random password, the password is also
-   * returned from the database procedure and is forwards through to the HTTP response. This
-   * response is not consumed by the client interface by default, and the user will have to discover
-   * it.
+   * Outstanding reset tokens, keyed by the SHA-256 of the token so the tokens themselves are never
+   * stored. Each entry holds the user name and the expiry time.
+   */
+  private static final ConcurrentHashMap<String, String[]> resetTokens =
+      new ConcurrentHashMap<String, String[]>();
+
+  /**
+   * Forgotten password function. A request for an email address creates a random, single use, short
+   * lived reset token that would only be emailed to the owner of that address; the response never
+   * contains a password or a token and is identical whether the address exists or not. Submitting a
+   * valid token with a new password sets that password (as a salted Argon2id hash). Reset requests
+   * are rate limited per address and invalid tokens are rate limited.
    *
    * @param subEmail Sub schema user email address
+   * @param resetToken Reset token from the emailed link (second step only)
+   * @param newPassword New password (second step only)
    */
   public void doPost(HttpServletRequest request, HttpServletResponse response)
       throws ServletException, IOException {
@@ -73,20 +116,24 @@ public class SessionManagement2ChangePassword extends HttpServlet {
       String htmlOutput = new String();
       log.debug(levelName + " Servlet accessed");
       try {
-        log.debug("Getting Challenge Parameter");
-        Object emailObj = request.getParameter("subEmail");
-        String subEmail = new String();
-        if (emailObj != null) {
-          subEmail = (String) emailObj;
-        }
-        log.debug("subEmail = " + subEmail);
+        log.debug("Getting Challenge Parameters");
+        String subEmail = request.getParameter("subEmail");
+        String resetToken = request.getParameter("resetToken");
+        String newPassword = request.getParameter("newPassword");
+        String applicationRoot = getServletContext().getRealPath("");
 
-        // The new password used to be generated, saved and then sent straight back in this
-        // response, so anyone who knew (or was shown) an account's email address could take that
-        // account over. A reset must only ever be delivered to the owner of the address, so this
-        // response never contains a password and the account is left unchanged.
-        log.debug("Password reset requested");
-        htmlOutput = bundle.getString("response.resetSent");
+        if (resetToken != null && newPassword != null) {
+          // Second step: the account owner follows the link that was emailed to them
+          log.debug("Password reset token submitted");
+          completeReset(applicationRoot, resetToken, newPassword);
+          htmlOutput = bundle.getString("response.resetDone");
+        } else {
+          // First step: never change the password here and never put a password or token in the
+          // response. The answer is the same whether or not the address belongs to an account.
+          log.debug("Password reset requested");
+          requestReset(applicationRoot, subEmail == null ? "" : subEmail);
+          htmlOutput = bundle.getString("response.resetSent");
+        }
         log.debug("Outputting HTML");
         out.write(htmlOutput);
       } catch (Exception e) {
@@ -95,6 +142,88 @@ public class SessionManagement2ChangePassword extends HttpServlet {
       }
     } else {
       log.error(levelName + " servlet accessed with no session");
+    }
+  }
+
+  private void requestReset(String applicationRoot, String email) throws SQLException {
+    String addressKey = "reset:" + email.trim().toLowerCase(Locale.ROOT);
+    if (resetRequests.isBlocked(addressKey)) {
+      log.debug("Too many reset requests for this address");
+      return;
+    }
+    resetRequests.recordFailure(addressKey);
+    Connection conn =
+        Database.getChallengeConnection(applicationRoot, "BrokenAuthAndSessMangChalTwo");
+    try {
+      PreparedStatement callstmt =
+          conn.prepareStatement("SELECT userName FROM users WHERE userAddress = ?");
+      callstmt.setString(1, email);
+      ResultSet resultSet = callstmt.executeQuery();
+      if (resultSet.next()) {
+        String userName = resultSet.getString(1);
+        byte[] tokenBytes = new byte[32];
+        random.nextBytes(tokenBytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+        // Only one outstanding token per account
+        for (Map.Entry<String, String[]> entry : resetTokens.entrySet()) {
+          if (entry.getValue()[0].equals(userName)) {
+            resetTokens.remove(entry.getKey(), entry.getValue());
+          }
+        }
+        resetTokens.put(
+            sha256(token),
+            new String[] {userName, Long.toString(System.currentTimeMillis() + TOKEN_LIFE_MS)});
+        // The token is only ever delivered out of band, by email to the address on the account.
+        // This challenge has no mail server, so it is not sent anywhere, and it is never logged or
+        // returned in the HTTP response.
+        log.debug("Reset token created");
+      }
+    } finally {
+      Database.closeConnection(conn);
+    }
+  }
+
+  private void completeReset(String applicationRoot, String token, String newPassword)
+      throws SQLException {
+    String tokenKey = "token";
+    if (tokenFailures.isBlocked(tokenKey)) {
+      log.debug("Too many invalid reset tokens");
+      return;
+    }
+    // Removing the token makes it single use, whatever happens next
+    String[] entry = resetTokens.remove(sha256(token));
+    if (entry == null || System.currentTimeMillis() > Long.parseLong(entry[1])) {
+      log.debug("Invalid or expired reset token");
+      tokenFailures.recordFailure(tokenKey);
+      return;
+    }
+    if (newPassword.length() < MIN_PASSWORD_LENGTH || newPassword.length() > MAX_PASSWORD_LENGTH) {
+      log.debug("New password rejected by password policy");
+      return;
+    }
+    Connection conn =
+        Database.getChallengeConnection(applicationRoot, "BrokenAuthAndSessMangChalTwo");
+    try {
+      PreparedStatement callstmt =
+          conn.prepareStatement("UPDATE users SET userPassword = ? WHERE userName = ?");
+      callstmt.setString(1, SessionManagement2.hashPassword(newPassword));
+      callstmt.setString(2, entry[0]);
+      callstmt.execute();
+      callstmt = conn.prepareStatement("COMMIT");
+      callstmt.execute();
+      SessionManagement2.attempts.reset("signIn:" + entry[0].toLowerCase(Locale.ROOT));
+      log.debug("Password reset completed");
+    } finally {
+      Database.closeConnection(conn);
+    }
+  }
+
+  private static String sha256(String value) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      return Hex.encodeHexString(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
     }
   }
 }

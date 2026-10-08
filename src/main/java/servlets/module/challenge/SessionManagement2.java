@@ -2,13 +2,18 @@ package servlets.module.challenge;
 
 import dbProcs.Database;
 import dbProcs.Getter;
+import de.mkammerer.argon2.Argon2;
+import de.mkammerer.argon2.Argon2Factory;
+import de.mkammerer.argon2.Argon2Factory.Argon2Types;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.ResourceBundle;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -47,11 +52,136 @@ public class SessionManagement2 extends HttpServlet {
   private static String levelHash =
       "d779e34a54172cbc245300d3bc22937090ebd3769466a501a5e7ac605b9f34b7";
 
+  /** Argon2id cost settings used for this challenge's account passwords */
+  private static final int ARGON2_ITERATIONS = 3;
+
+  private static final int ARGON2_MEMORY_KB = 65536;
+  private static final int ARGON2_PARALLELISM = 1;
+
+  /** At most this many failed sign ins per user name within the window before it is blocked */
+  private static final int MAX_SIGN_IN_FAILURES = 5;
+
+  private static final long ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+  /** Failed sign in counters, kept on the server */
+  static final AttemptLimiter attempts =
+      new AttemptLimiter(MAX_SIGN_IN_FAILURES, ATTEMPT_WINDOW_MS);
+
   /**
-   * The user attempts to use this function to sign into a sub schema. If they successfully sign in
-   * then they are able to retrieve the result key for the challenge If they sign in with a correct
-   * user name but incorrect password then the email address of the user will be returned in a error
-   * message
+   * Hash of a random throwaway password, checked when the user name does not exist so that the
+   * response takes as long as a real password check
+   */
+  private static final String DUMMY_HASH = hashPassword(Hash.randomString());
+
+  private static Argon2 argon2() {
+    return Argon2Factory.create(Argon2Types.ARGON2id);
+  }
+
+  /**
+   * Hashes a password with a fresh random salt using Argon2id
+   *
+   * @param password The password to hash
+   * @return The encoded Argon2id hash, including its salt and cost settings
+   */
+  static String hashPassword(String password) {
+    char[] chars = password.toCharArray();
+    Argon2 argon2 = argon2();
+    try {
+      return argon2.hash(ARGON2_ITERATIONS, ARGON2_MEMORY_KB, ARGON2_PARALLELISM, chars);
+    } finally {
+      argon2.wipeArray(chars);
+    }
+  }
+
+  private static boolean verifyPassword(String encodedHash, String password) {
+    char[] chars = password.toCharArray();
+    Argon2 argon2 = argon2();
+    try {
+      return argon2.verify(encodedHash, chars);
+    } catch (RuntimeException e) {
+      log.error(levelName + " password check failed: " + e.toString());
+      return false;
+    } finally {
+      argon2.wipeArray(chars);
+    }
+  }
+
+  /**
+   * Server side counter of attempts per key (a user name or an email address). Once a key reaches
+   * the limit inside the window it is blocked until the window has passed. Nothing is slept;
+   * blocked requests simply get the same generic answer without being processed.
+   */
+  static final class AttemptLimiter {
+    private static final int MAX_TRACKED_KEYS = 10000;
+
+    private final int maxAttempts;
+    private final long windowMs;
+    private final ConcurrentHashMap<String, long[]> counters =
+        new ConcurrentHashMap<String, long[]>();
+
+    AttemptLimiter(int maxAttempts, long windowMs) {
+      this.maxAttempts = maxAttempts;
+      this.windowMs = windowMs;
+    }
+
+    /**
+     * @return true if the key has used up its attempts in the current window
+     */
+    boolean isBlocked(String key) {
+      long[] counter = counters.get(key);
+      if (counter == null) {
+        return false;
+      }
+      synchronized (counter) {
+        if (System.currentTimeMillis() - counter[1] > windowMs) {
+          counters.remove(key, counter);
+          return false;
+        }
+        return counter[0] >= maxAttempts;
+      }
+    }
+
+    /** Counts one attempt against the key */
+    void recordFailure(String key) {
+      if (counters.size() > MAX_TRACKED_KEYS) {
+        purgeExpired();
+      }
+      long now = System.currentTimeMillis();
+      long[] counter = counters.putIfAbsent(key, new long[] {1, now});
+      if (counter != null) {
+        synchronized (counter) {
+          if (now - counter[1] > windowMs) {
+            counter[0] = 1;
+            counter[1] = now;
+          } else {
+            counter[0]++;
+          }
+        }
+      }
+    }
+
+    void reset(String key) {
+      counters.remove(key);
+    }
+
+    private void purgeExpired() {
+      long now = System.currentTimeMillis();
+      for (Map.Entry<String, long[]> entry : counters.entrySet()) {
+        long[] counter = entry.getValue();
+        synchronized (counter) {
+          if (now - counter[1] > windowMs) {
+            counters.remove(entry.getKey(), counter);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * The user attempts to use this function to sign into a sub schema. Only a correct user name and
+   * password, checked against a salted Argon2id hash, returns the result key. Every failure gets
+   * the same generic message whether or not the user name exists, and repeated failures for a user
+   * name are blocked for a while.
    *
    * @param subName Sub schema user name
    * @param subName Sub schema user password
@@ -94,7 +224,6 @@ public class SessionManagement2 extends HttpServlet {
           subPass = (String) passObj;
         }
         log.debug("subName = " + subName);
-        log.debug("subPass = " + subPass);
 
         log.debug("Getting ApplicationRoot");
         String ApplicationRoot = getServletContext().getRealPath("");
@@ -110,19 +239,45 @@ public class SessionManagement2 extends HttpServlet {
         callstmt.execute();
         log.debug("Changes committed.");
 
-        // Every password the old reset function set was also sent back in its HTTP response, so
-        // all of them are compromised. Those passwords were stored as unsalted SHA-1 hashes; by
-        // only accepting SHA-256 hashes, any password handed out that way can no longer be used to
-        // sign in, even on a database that still holds the values it wrote.
-        callstmt =
-            conn.prepareStatement(
-                "SELECT userName, userAddress FROM users WHERE userName = ? AND userPassword ="
-                    + " SHA2(?, 256)");
-        callstmt.setString(1, subName);
-        callstmt.setString(2, subPass);
-        log.debug("Executing authUser");
-        ResultSet resultSet = callstmt.executeQuery();
-        if (resultSet.next()) {
+        // Throttle repeated failures per submitted user name, whether or not that account exists,
+        // so the login form cannot be used to brute force a password or to tell accounts apart.
+        String accountKey = "signIn:" + subName.trim().toLowerCase(Locale.ROOT);
+        boolean authenticated = false;
+        String signedInUser = null;
+        if (attempts.isBlocked(accountKey)) {
+          log.debug("Too many failed sign in attempts for this user name");
+        } else {
+          callstmt =
+              conn.prepareStatement("SELECT userName, userPassword FROM users WHERE userName = ?");
+          callstmt.setString(1, subName);
+          log.debug("Executing authUser");
+          ResultSet resultSet = callstmt.executeQuery();
+          String storedHash = DUMMY_HASH;
+          boolean userFound = false;
+          if (resultSet.next()) {
+            userFound = true;
+            signedInUser = resultSet.getString(1);
+            String dbHash = resultSet.getString(2);
+            // Only salted Argon2id hashes are accepted. Anything else (seed placeholders, or the
+            // unsalted SHA-1 hashes of passwords that the old reset function sent back to whoever
+            // asked) can never sign in.
+            if (dbHash != null && dbHash.startsWith("$argon2id$")) {
+              storedHash = dbHash;
+            } else {
+              userFound = false;
+            }
+          }
+          // Always run the same password check so the response time does not reveal whether the
+          // user name exists
+          boolean passwordOk = verifyPassword(storedHash, subPass);
+          authenticated = userFound && passwordOk;
+          if (authenticated) {
+            attempts.reset(accountKey);
+          } else {
+            attempts.recordFailure(accountKey);
+          }
+        }
+        if (authenticated) {
           log.debug("Successful Login");
           // Get key and add it to the output
           String userKey =
@@ -133,7 +288,7 @@ public class SessionManagement2 extends HttpServlet {
               "<h2 class='title'>"
                   + bundle.getString("response.welcome")
                   + " "
-                  + Encode.forHtml(resultSet.getString(1))
+                  + Encode.forHtml(signedInUser)
                   + "</h2>"
                   + "<p>"
                   + bundle.getString("response.resultKey")

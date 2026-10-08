@@ -13,6 +13,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import utils.CsrfGuard;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -38,11 +39,29 @@ public class CsrfChallengeTargetThree extends HttpServlet {
 
   private static final long serialVersionUID = 1L;
   private static final Logger log = LogManager.getLogger(CsrfChallengeTargetThree.class);
+  private static final String CSRF_TOKEN_ATTRIBUTE = "csrfChallengeThreeTargetToken";
   private static String levelName = "CSRF 3 Target";
 
   /**
-   * CSRF vulnerable function that can be used by users to force other users to mark their CSRF
-   * challenge Three as complete.
+   * State changing requests must use POST. GET requests (e.g. forged through an embedded image) are
+   * refused without side effects.
+   */
+  public void doGet(HttpServletRequest request, HttpServletResponse response)
+      throws ServletException, IOException {
+    ShepherdLogManager.setRequestIp(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"));
+    log.debug(levelName + " refused non POST request");
+    Locale locale = new Locale(Validate.validateLanguage(request.getSession()));
+    ResourceBundle csrfGenerics =
+        ResourceBundle.getBundle("i18n.servlets.challenges.csrf.csrfGenerics", locale);
+    PrintWriter out = response.getWriter();
+    out.print(getServletInfo());
+    out.write(csrfGenerics.getString("target.incrementFailed"));
+  }
+
+  /**
+   * Increments another user's CSRF counter. Protected against CSRF: POST only, same-origin and a
+   * per-session anti-CSRF token are required. Originally used to force other users to mark their
+   * CSRF challenge Three as complete.
    *
    * @param userId User identifier to be incremented
    */
@@ -80,7 +99,16 @@ public class CsrfChallengeTargetThree extends HttpServlet {
         }
 
         String userId = (String) ses.getAttribute("userStamp");
-        if (!userId.equals(plusId) && csrfParam != null) {
+        // Anti-CSRF: same origin + per-session unpredictable token (constant-time compare)
+        CsrfGuard.getOrCreateToken(ses, CSRF_TOKEN_ATTRIBUTE);
+        boolean csrfValid =
+            CsrfGuard.isSameOrigin(request)
+                && CsrfGuard.isValidToken(
+                    ses, CSRF_TOKEN_ATTRIBUTE, request.getParameter("csrfToken"));
+        if (!csrfValid) {
+          log.debug(levelName + " request refused: missing/invalid anti-CSRF token or origin");
+        }
+        if (csrfValid && !userId.equals(plusId) && csrfParam != null) {
           String ApplicationRoot = getServletContext().getRealPath("");
           String userName = (String) ses.getAttribute("userName");
           String attackerName = Getter.getUserName(ApplicationRoot, plusId);

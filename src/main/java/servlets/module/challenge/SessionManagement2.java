@@ -138,21 +138,10 @@ public class SessionManagement2 extends HttpServlet {
                   + "</a>"
                   + "</p>";
         } else {
-          log.debug("Incorrect credentials, checking if user name correct");
-          callstmt = conn.prepareStatement("SELECT userAddress FROM users WHERE userName = ?");
-          callstmt.setString(1, subName);
-          log.debug("Executing getAddress");
-          resultSet = callstmt.executeQuery();
-          if (resultSet.next()) {
-            log.debug("User Found");
-            userAddress =
-                bundle.getString("response.badPass")
-                    + " <a>"
-                    + Encode.forHtml(resultSet.getString(1))
-                    + "</a><br/>";
-          } else {
-            userAddress = bundle.getString("response.badUser") + "<br/>";
-          }
+          // Same message whether the user name or the password was wrong, and never show the
+          // account's email address, which is what the password reset function asks for
+          log.debug("Incorrect credentials");
+          userAddress = bundle.getString("response.badCredentials") + "<br/>";
           htmlOutput = makeTable(userAddress, bundle);
         }
         Database.closeConnection(conn);

@@ -1,11 +1,7 @@
 package servlets.module.challenge;
 
-import dbProcs.Database;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import javax.servlet.ServletException;
@@ -15,8 +11,6 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.owasp.encoder.Encode;
-import utils.Hash;
 import utils.ShepherdLogManager;
 import utils.Validate;
 
@@ -87,34 +81,14 @@ public class SessionManagement2ChangePassword extends HttpServlet {
         }
         log.debug("subEmail = " + subEmail);
 
-        log.debug("Getting ApplicationRoot");
-        String ApplicationRoot = getServletContext().getRealPath("");
-
-        String newPassword = Hash.randomString();
-        try {
-          Connection conn =
-              Database.getChallengeConnection(ApplicationRoot, "BrokenAuthAndSessMangChalTwo");
-          log.debug("Checking credentials");
-          PreparedStatement callstmt =
-              conn.prepareStatement("UPDATE users SET userPassword = SHA(?) WHERE userAddress = ?");
-          callstmt.setString(1, newPassword);
-          callstmt.setString(2, subEmail);
-          log.debug("Executing resetPassword");
-          callstmt.execute();
-          log.debug("Statement executed");
-
-          log.debug("Committing changes made to database");
-          callstmt = conn.prepareStatement("COMMIT");
-          callstmt.execute();
-          log.debug("Changes committed.");
-
-          htmlOutput = Encode.forHtml(newPassword);
-          Database.closeConnection(conn);
-        } catch (SQLException e) {
-          log.error(levelName + " SQL Error: " + e.toString());
-        }
+        // The new password used to be generated, saved and then sent straight back in this
+        // response, so anyone who knew (or was shown) an account's email address could take that
+        // account over. A reset must only ever be delivered to the owner of the address, so this
+        // response never contains a password and the account is left unchanged.
+        log.debug("Password reset requested");
+        htmlOutput = bundle.getString("response.resetSent");
         log.debug("Outputting HTML");
-        out.write(bundle.getString("response.changedTo") + " " + htmlOutput);
+        out.write(htmlOutput);
       } catch (Exception e) {
         out.write(errors.getString("error.funky"));
         log.fatal(levelName + " - " + e.toString());

@@ -132,7 +132,10 @@ public class SessionManagement2ChangePassword extends HttpServlet {
           // response. The answer is the same whether or not the address belongs to an account.
           log.debug("Password reset requested");
           requestReset(applicationRoot, subEmail == null ? "" : subEmail);
-          htmlOutput = bundle.getString("response.resetSent");
+          // Keep the usual "Changed To:" answer shape the challenge client expects, but in place
+          // of a password it only says that the reset was sent to the address owner.
+          htmlOutput =
+              bundle.getString("response.changedTo") + " " + bundle.getString("response.resetSent");
         }
         log.debug("Outputting HTML");
         out.write(htmlOutput);
